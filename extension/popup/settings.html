@@ -9,51 +9,18 @@
   <div class="settings-container">
     <div class="settings-header">
       <h2>⚙️ YouTube Recap Bot</h2>
-      <p>Configure your AI-powered video recap assistant</p>
+      <p>AI-powered video recap assistant</p>
     </div>
     
     <div class="settings-content">
       <div class="setting-group">
-        <label for="aiProvider">AI Provider</label>
-        <select id="aiProvider" class="select-input">
-          <option value="demo">Demo Mode (No API needed)</option>
-          <option value="groq">Groq (FREE - Fast & Recommended!)</option>
-          <option value="huggingface">Hugging Face (FREE)</option>
-          <option value="gemini">Google Gemini (FREE)</option>
-          <option value="openai">OpenAI (Paid)</option>
-        </select>
-        <small>Choose your AI provider. Groq is the best free option!</small>
-      </div>
-
-      <div class="setting-group" id="demoInfo" style="display: none;">
-        <div style="background: #2a2a2a; padding: 12px; border-radius: 6px; border-left: 3px solid #8b5cf6;">
-          <strong>🎮 Demo Mode Active</strong>
-          <p style="margin: 8px 0 0 0; font-size: 13px; color: #ccc;">Using sample AI responses. No API key needed! Perfect for testing.</p>
+        <div style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(124, 58, 237, 0.1) 100%); padding: 16px; border-radius: 12px; border: 2px solid rgba(139, 92, 246, 0.4);">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+            <span style="font-size: 24px;">✅</span>
+            <strong style="font-size: 16px; color: #8b5cf6;">Groq AI Configured</strong>
+          </div>
+          <p style="margin: 0; font-size: 13px; color: #ccc;">API key is hardcoded in the extension. Ready to use!</p>
         </div>
-      </div>
-
-      <div class="setting-group" id="groqKeyGroup" style="display: none;">
-        <label for="groqKey">Groq API Key</label>
-        <input type="password" id="groqKey" placeholder="gsk_...">
-        <small>Get your FREE API key: <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a> → Sign up (no credit card!) → Create API Key</small>
-      </div>
-
-      <div class="setting-group" id="huggingfaceKeyGroup" style="display: none;">
-        <label for="huggingfaceKey">Hugging Face Token</label>
-        <input type="password" id="huggingfaceKey" placeholder="hf_...">
-        <small>Get your FREE token: <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a> → New token → Copy & paste above</small>
-      </div>
-
-      <div class="setting-group" id="geminiKeyGroup" style="display: none;">
-        <label for="geminiKey">Google Gemini API Key</label>
-        <input type="password" id="geminiKey" placeholder="AIza...">
-        <small>Get your FREE API key: <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com/app/apikey</a> → Create API Key</small>
-      </div>
-      
-      <div class="setting-group" id="openaiKeyGroup" style="display: none;">
-        <label for="apiKey">OpenAI API Key</label>
-        <input type="password" id="apiKey" placeholder="sk-...">
-        <small>Get your API key: <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a></small>
       </div>
       
       <div class="setting-group">
@@ -71,19 +38,19 @@
       
       <div class="button-group">
         <button id="saveSettings" class="btn-primary">Save Settings</button>
-        <button id="testConnection" class="btn-secondary">Test API Connection</button>
       </div>
       
       <div id="statusMessage" class="status-message"></div>
     </div>
     
     <div class="settings-footer">
-      <h3>How it works:</h3>
+      <h3>✨ Features:</h3>
       <ul>
-        <li>📺 Automatically detects when you pause YouTube videos</li>
-        <li>🤖 Generates 3-bullet summary of the last 20 seconds using AI</li>
-        <li>💬 Ask questions about the video content</li>
-        <li>🎯 Uses actual transcript for accurate summaries</li>
+        <li>📺 Auto-detects when you pause YouTube videos</li>
+        <li>🤖 AI generates 3-bullet summary of last 20 seconds</li>
+        <li>💬 Interactive chat - ask questions about the video</li>
+        <li>🎯 Uses actual transcript for accurate answers</li>
+        <li>⚡ Powered by Groq AI (fast & free)</li>
       </ul>
     </div>
   </div>

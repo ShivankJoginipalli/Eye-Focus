@@ -31,7 +31,7 @@ class YouTubeRecapBot {
   async loadSettings() {
     try {
       const stored = await chrome.storage.sync.get({
-        aiProvider: 'demo',
+        aiProvider: 'groq',
         groqKey: '',
         huggingfaceKey: '',
         geminiKey: '',
@@ -39,10 +39,30 @@ class YouTubeRecapBot {
         pauseDelay: 1,
         showOnPause: true
       });
-      this.settings = stored;
+      
+      // Use API key from config.js file (which is gitignored)
+      const configuredGroqKey = typeof API_CONFIG !== 'undefined' ? API_CONFIG.groqKey : '';
+      
+      // Map aiProvider to provider for consistency
+      this.settings = {
+        ...stored,
+        provider: stored.aiProvider || 'groq',
+        groqKey: configuredGroqKey || stored.groqKey
+      };
+      
+      console.log('📋 Settings loaded - Provider:', this.settings.provider, 'Groq Key:', this.settings.groqKey ? '✓ Set' : '✗ Not set');
     } catch (error) {
       console.error('❌ Error loading settings:', error);
       // Use defaults if storage fails
+      const configuredGroqKey = typeof API_CONFIG !== 'undefined' ? API_CONFIG.groqKey : '';
+      this.settings = {
+        provider: 'groq',
+        aiProvider: 'groq',
+        groqKey: configuredGroqKey,
+        apiKey: '',
+        pauseDelay: 1,
+        showOnPause: true
+      };
     }
   }
 
@@ -1158,6 +1178,40 @@ Format as:
       const message = input.value.trim();
       if (!message) return;
 
+      console.log('💬 User asked:', message);
+      console.log('🔧 Current provider:', this.settings.provider);
+      
+      // Get the correct API key based on provider
+      let apiKeyPresent = false;
+      if (this.settings.provider === 'groq') {
+        apiKeyPresent = !!this.settings.groqKey;
+        console.log('🔑 Groq Key present:', apiKeyPresent);
+      } else if (this.settings.provider === 'huggingface') {
+        apiKeyPresent = !!this.settings.huggingfaceKey;
+        console.log('🔑 HuggingFace Key present:', apiKeyPresent);
+      } else if (this.settings.provider === 'gemini') {
+        apiKeyPresent = !!this.settings.geminiKey;
+        console.log('🔑 Gemini Key present:', apiKeyPresent);
+      } else if (this.settings.provider === 'openai') {
+        apiKeyPresent = !!this.settings.apiKey;
+        console.log('🔑 OpenAI Key present:', apiKeyPresent);
+      }
+
+      // Check if AI is configured
+      if (!this.settings.provider || this.settings.provider === 'demo') {
+        this.addUserMessage(message);
+        this.addBotMessage(`⚙️ **AI Provider Not Configured**\n\nTo get real answers:\n1. Click the extension icon\n2. Select "Groq" (free!)\n3. Get API key from https://console.groq.com\n4. Save settings\n\nThen ask again!`);
+        input.value = '';
+        return;
+      }
+
+      if (!apiKeyPresent) {
+        this.addUserMessage(message);
+        this.addBotMessage(`🔑 **API Key Missing**\n\nPlease add your ${this.settings.provider} API key in settings.`);
+        input.value = '';
+        return;
+      }
+
       this.addUserMessage(message);
       input.value = '';
 
@@ -1208,6 +1262,10 @@ Format as:
     const messagesDiv = this.recapOverlay?.querySelector('.recap-messages');
     if (!messagesDiv) return;
 
+    console.log('🤖 Processing question:', question);
+    console.log('📋 Provider:', this.settings.provider);
+    console.log('🔑 Has API key:', !!this.settings.apiKey);
+
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'message bot-message loading-message';
     loadingDiv.innerHTML = `
@@ -1221,16 +1279,36 @@ Format as:
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
     try {
+      // Get fresh video context
+      const video = document.querySelector('video');
+      const currentTime = video ? video.currentTime : this.currentContext.currentTime;
+      
+      // Check if we need to refresh transcript
+      if (!this.currentContext.captions || !this.currentContext.captions.fullTranscript) {
+        console.log('📜 Fetching transcript for chat...');
+        const transcriptData = await this.getYouTubeTranscript(currentTime);
+        if (transcriptData) {
+          this.currentContext.captions = transcriptData;
+          console.log('✅ Transcript loaded');
+        }
+      }
+
       let response;
       const hasTranscript = this.currentContext.captions && this.currentContext.captions.hasContent;
+      
+      console.log('📝 Has transcript:', hasTranscript);
       
       const contextInfo = {
         title: this.currentContext.title,
         channel: this.currentContext.channel,
-        currentTime: this.currentContext.currentTime,
+        currentTime: currentTime,
+        duration: video ? video.duration : 0,
         question: question,
-        transcript: hasTranscript ? this.currentContext.captions.fullTranscript : null
+        transcript: hasTranscript ? this.currentContext.captions.fullTranscript : null,
+        last20Seconds: hasTranscript ? this.currentContext.captions.last20Seconds : null
       };
+
+      console.log('🎯 Calling AI with provider:', this.settings.provider);
 
       switch (this.settings.provider) {
         case 'groq':
@@ -1249,17 +1327,18 @@ Format as:
           response = await this.generateDemoChatResponse(contextInfo);
       }
 
+      console.log('✅ Got AI response');
       loadingDiv.remove();
       this.addBotMessage(response);
     } catch (error) {
-      console.error('Error generating chat response:', error);
+      console.error('❌ Chat error:', error);
       loadingDiv.remove();
-      this.addBotMessage(`❌ Error: ${error.message}`);
+      this.addBotMessage(`❌ **Error:** ${error.message}\n\nCheck console (F12) for details or verify your API key in settings.`);
     }
   }
 
   async generateGroqChatResponse(context) {
-    const apiKey = this.settings.apiKey;
+    const apiKey = this.settings.groqKey;
     if (!apiKey) throw new Error('Groq API key not configured');
 
     const transcriptContext = context.transcript ? 
@@ -1291,7 +1370,7 @@ Format as:
   }
 
   async generateHuggingFaceChatResponse(context) {
-    const apiKey = this.settings.apiKey;
+    const apiKey = this.settings.huggingfaceKey;
     if (!apiKey) throw new Error('HuggingFace API key not configured');
 
     const transcriptContext = context.transcript ? 
@@ -1321,7 +1400,7 @@ Format as:
   }
 
   async generateGeminiChatResponse(context) {
-    const apiKey = this.settings.apiKey;
+    const apiKey = this.settings.geminiKey;
     if (!apiKey) throw new Error('Gemini API key not configured');
 
     const transcriptContext = context.transcript ? 

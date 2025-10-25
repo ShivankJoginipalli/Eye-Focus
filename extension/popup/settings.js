@@ -7,47 +7,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadSettings() {
   try {
     const settings = await chrome.storage.sync.get({
-      aiProvider: 'demo',
-      groqKey: '',
-      huggingfaceKey: '',
-      geminiKey: '',
-      apiKey: '',
       pauseDelay: 1,
       showOnPause: true
     });
 
-    document.getElementById('aiProvider').value = settings.aiProvider;
-    document.getElementById('groqKey').value = settings.groqKey;
-    document.getElementById('huggingfaceKey').value = settings.huggingfaceKey;
-    document.getElementById('geminiKey').value = settings.geminiKey;
-    document.getElementById('apiKey').value = settings.apiKey;
     document.getElementById('pauseDelay').value = settings.pauseDelay;
     document.getElementById('showOnPause').checked = settings.showOnPause;
-    
-    // Show/hide appropriate API key field
-    toggleApiKeyFields(settings.aiProvider);
   } catch (error) {
     console.error('Error loading settings:', error);
     showStatus('Error loading settings', 'error');
   }
 }
-
-function toggleApiKeyFields(provider) {
-  const demoInfo = document.getElementById('demoInfo');
-  const groqGroup = document.getElementById('groqKeyGroup');
-  const huggingfaceGroup = document.getElementById('huggingfaceKeyGroup');
-  const geminiGroup = document.getElementById('geminiKeyGroup');
-  const openaiGroup = document.getElementById('openaiKeyGroup');
-  
-  // Hide all first
-  demoInfo.style.display = 'none';
-  groqGroup.style.display = 'none';
-  huggingfaceGroup.style.display = 'none';
-  geminiGroup.style.display = 'none';
-  openaiGroup.style.display = 'none';
-  
-  // Show appropriate one
-  if (provider === 'demo') {
     demoInfo.style.display = 'block';
   } else if (provider === 'groq') {
     groqGroup.style.display = 'block';
@@ -77,57 +47,26 @@ function attachEventListeners() {
 async function saveSettings() {
   try {
     const settings = {
-      aiProvider: document.getElementById('aiProvider').value,
-      groqKey: document.getElementById('groqKey').value.trim(),
-      huggingfaceKey: document.getElementById('huggingfaceKey').value.trim(),
-      geminiKey: document.getElementById('geminiKey').value.trim(),
-      apiKey: document.getElementById('apiKey').value.trim(),
+
+function attachEventListeners() {
+  document.getElementById('saveSettings').addEventListener('click', saveSettings);
+}
+
+async function saveSettings() {
+  try {
+    const settings = {
       pauseDelay: parseInt(document.getElementById('pauseDelay').value),
       showOnPause: document.getElementById('showOnPause').checked
     };
 
     await chrome.storage.sync.set(settings);
-    showStatus('Settings saved successfully!', 'success');
+    showStatus('✅ Settings saved successfully!', 'success');
     
-    // Notify content scripts of updated settings
-    try {
-      const tabs = await chrome.tabs.query({url: '*://*.youtube.com/*'});
-      for (const tab of tabs) {
-        chrome.tabs.sendMessage(tab.id, {
-          type: 'SETTINGS_UPDATED',
-          settings: settings
-        }).catch(() => {
-          // Ignore errors for tabs without content script
-        });
-      }
-    } catch (error) {
-      console.warn('Could not notify content scripts:', error);
-    }
-
   } catch (error) {
     console.error('Error saving settings:', error);
-    showStatus('Error saving settings', 'error');
+    showStatus('❌ Error saving settings', 'error');
   }
 }
-
-async function testConnection() {
-  const aiProvider = document.getElementById('aiProvider').value;
-  
-  if (aiProvider === 'demo') {
-    showStatus('✅ Demo mode active - No API needed!', 'success');
-  } else if (aiProvider === 'groq') {
-    await testGroqConnection();
-  } else if (aiProvider === 'huggingface') {
-    await testHuggingFaceConnection();
-  } else if (aiProvider === 'gemini') {
-    await testGeminiConnection();
-  } else {
-    await testOpenAIConnection();
-  }
-}
-
-async function testGroqConnection() {
-  const apiKey = document.getElementById('groqKey').value.trim();
   
   if (!apiKey) {
     showStatus('Please enter a Groq API key first', 'error');
@@ -268,10 +207,12 @@ async function testOpenAIConnection() {
   }
 }
 
+
 function showStatus(message, type) {
   const statusEl = document.getElementById('statusMessage');
   statusEl.textContent = message;
   statusEl.className = `status-message ${type}`;
+  statusEl.style.display = 'block';
   
   if (type === 'success') {
     setTimeout(() => {

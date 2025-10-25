@@ -20,7 +20,7 @@
   "content_scripts": [
     {
       "matches": ["*://*.youtube.com/*"],
-      "js": ["content/youtube-detector.js"],
+      "js": ["config.js", "content/youtube-detector.js"],
       "css": ["content/recap-overlay.css"],
       "run_at": "document_idle"
     }
