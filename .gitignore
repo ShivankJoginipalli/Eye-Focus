@@ -1,6 +1,21 @@
 # API Configuration
 extension/config.js
 
+# User-specific configuration (created from templates)
+native_messaging_host.json
+eye_monitor.bat
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.log
+
+# Lock files
+.eye_monitor.lock
+
 # Node modules
 node_modules/
 

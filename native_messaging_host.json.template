@@ -1,0 +1,9 @@
+{
+  "path": "REPLACE_WITH_YOUR_FULL_PATH_TO_eye_monitor.bat",
+  "description": "Eye Focus Monitor - Native messaging host for YouTube eye tracking",
+  "allowed_origins": [
+    "chrome-extension://YOUR_EXTENSION_ID_HERE/"
+  ],
+  "type": "stdio",
+  "name": "com.eyefocus.monitor"
+}

@@ -1,0 +1,3 @@
+@echo off
+REM Replace paths below with your actual installation paths
+"C:\PATH\TO\YOUR\.venv\Scripts\python.exe" "%~dp0eye_monitor_debug_view.py" %*
