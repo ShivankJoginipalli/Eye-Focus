@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Recap Bot",
-  "version": "1.0.0",
-  "description": "AI-powered recap chatbot that appears when you pause YouTube videos",
+  "name": "YouTube Recap Bot with Eye Tracking",
+  "version": "2.0.0",
+  "description": "AI-powered recap chatbot with eye tracking - pauses when you look away",
   
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "nativeMessaging"
   ],
   
   "host_permissions": [
@@ -35,6 +36,10 @@
     "16": "assets/icon-16.png",
     "48": "assets/icon-48.png",
     "128": "assets/icon-128.png"
+  },
+  
+  "background": {
+    "service_worker": "background.js"
   },
   
   "web_accessible_resources": [

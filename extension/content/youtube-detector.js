@@ -1,6 +1,12 @@
 // YouTube Recap Bot - Main Content Script
-console.log('🎬 YouTube Recap Bot loaded');
+console.log('🎬 YouTube Recap Bot script executing...');
 
+// Prevent multiple instances
+if (window.youtubeRecapBotInstance) {
+  console.log('⚠️ YouTube Recap Bot instance already exists, skipping initialization');
+} else {
+  console.log('✅ Creating new YouTube Recap Bot instance');
+  
 class YouTubeRecapBot {
   constructor() {
     this.currentVideo = null;
@@ -19,6 +25,17 @@ class YouTubeRecapBot {
   async init() {
     await this.loadSettings();
     console.log('✅ Settings loaded:', this.settings);
+    
+    // Listen for eye tracking messages from background script
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      console.log('📨 Message received:', message);
+      if (message.type === 'EYE_TRACKING_PAUSE') {
+        console.log('👁️ Eye tracking detected: User looked away');
+        this.handleEyeTrackingPause(message.reason);
+        sendResponse({ success: true });
+      }
+      return true; // Keep channel open for async response
+    });
     
     // Wait for page to be ready
     if (document.readyState === 'loading') {
@@ -138,14 +155,65 @@ class YouTubeRecapBot {
     this.hideRecapOverlay();
   }
 
-  async showRecapOverlay() {
+  handleEyeTrackingPause(reason) {
+    console.log('👁️ Eye tracking pause triggered:', reason);
+    
+    // Try multiple selectors to find the video
+    let video = document.querySelector('video.html5-main-video');
+    if (!video) {
+      video = document.querySelector('video');
+    }
+    if (!video) {
+      video = document.querySelector('.html5-video-player video');
+    }
+    
+    console.log('📹 Video element found:', !!video);
+    console.log('📹 Video element:', video);
+    console.log('📹 Video paused state:', video ? video.paused : 'no video');
+    
+    if (video) {
+      if (!video.paused) {
+        try {
+          // Pause the video
+          video.pause();
+          console.log('⏸️ Video paused by eye tracking');
+          
+          // Show overlay with eye tracking message
+          this.showRecapOverlay(true, reason);
+        } catch (e) {
+          console.error('❌ Error pausing video:', e);
+        }
+      } else {
+        console.log('⚠️ Video already paused');
+      }
+    } else {
+      console.error('❌ No video element found on page');
+      console.log('Available videos:', document.querySelectorAll('video'));
+    }
+  }
+
+  async showRecapOverlay(isEyeTracking = false, reason = null) {
     if (this.recapOverlay) {
-      console.log('⚠️ Overlay already visible');
+      console.log('⚠️ Overlay already visible, not creating duplicate');
       return;
+    }
+    
+    // Prevent duplicate overlays
+    const existingOverlay = document.querySelector('.youtube-recap-overlay');
+    if (existingOverlay) {
+      console.log('⚠️ Removing existing overlay before creating new one');
+      existingOverlay.remove();
     }
     
     console.log('🎨 Creating recap overlay...');
     const context = await this.getVideoContext();
+    
+    // Add eye tracking info if applicable
+    if (isEyeTracking) {
+      context.eyeTracking = true;
+      context.pauseReason = reason;
+    }
+    
     this.createRecapOverlay(context);
     await this.generateAutoSummary(context);
   }
@@ -1493,4 +1561,10 @@ Format as:
   }
 }
 
-new YouTubeRecapBot();
+// Initialize only if instance doesn't exist
+if (!window.youtubeRecapBotInstance) {
+  window.youtubeRecapBotInstance = new YouTubeRecapBot();
+  console.log('✅ YouTube Recap Bot initialized');
+}
+
+} // End of if block from top of file
