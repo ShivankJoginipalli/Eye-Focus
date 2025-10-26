@@ -1,0 +1,367 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Posture Detector (MoveNet)</title>
+  <style>
+    /* UI layout — change sizes here if needed */
+    body { font-family: Arial, Helvetica, sans-serif; margin: 12px; background:#111; color:#eee; }
+    #container { position: relative; width: 720px; max-width: 100%; z-index: 1; }
+    /* video + overlay stacked inside container; canvas pointer-events:none so clicks go through */
+    video { display:block; width: 100%; border-radius: 8px; background:#222; z-index: 1; }
+    canvas { position: absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; z-index: 2; border-radius: 8px; }
+    /* Controls should be on top and easily clickable */
+    #controls { margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; position: relative; z-index: 20; background: rgba(0,0,0,0.35); padding: 8px; border-radius: 6px; }
+    button { padding:10px 14px; cursor: pointer; }
+    #status { margin-left: 8px; font-weight:600; }
+    #banner { margin-top:10px; padding:10px; border-radius:6px; background:#330000; color:#ffb3b3; display:none; }
+    #metrics { margin-top:8px; font-size:13px; color:#ccc; }
+    label { display:flex; gap:8px; align-items:center; }
+  </style>
+</head>
+<body>
+  <h2>Posture Detector</h2>
+
+  <!-- VIDEO + OVERLAY: do not change ids -->
+  <div id="container">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <!-- CONTROLS: thresholds and status -->
+  <div id="controls">
+     <!-- Added tabindex/aria to improve accessibility and ensure focus/click behavior -->
+    <button id="startBtn" tabindex="0" aria-label="Start posture detection">Start</button>
+    <button id="stopBtn" tabindex="0" aria-label="Stop posture detection" disabled>Stop</button>
+
+    <!-- Threshold slider — change default value below or in JS if desired -->
+    <label>
+      Torso angle threshold:
+      <input id="angleThresh" type="range" min="5" max="40" value="12">
+      <span id="angleVal">12°</span>
+    </label>
+
+    <label>
+      Head-forward threshold (normalized):
+      <input id="headThresh" type="range" min="10" max="50" value="25">
+      <span id="headVal">0.25</span>
+      <!-- NOTE: head slider value is percent, JS converts to 0.xx -->
+    </label>
+
+    <span id="status">idle</span>
+  </div>
+
+  <div id="metrics">Torso angle: <span id="torsoAngle">—</span>°, Head forward: <span id="headForward">—</span></div>
+  <div id="banner">You're slouching — please sit up.</div>
+
+  <!-- UMD builds (preferred here to avoid bare imports). Keep these lines. -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.9.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection/dist/pose-detection.min.js"></script>
+
+  <script>
+  // -------------------------
+  // CONFIG (change these)
+  // -------------------------
+  const SLouch_TRIGGER_MS = 2000;        // how long slouch must persist before alert (ms)
+  const MIN_KEYPOINT_SCORE = 0.45;       // keypoint confidence threshold
+  const SMOOTH_ALPHA = 0.15;             // EMA alpha for smoothing noisy metrics (0-1, lower = smoother/slower)
+ const CHANGE_CONFIRM_MS = 600;         // require this long of consistent state before switching UI state
+ const HYSTERESIS_ANGLE_DEG = 2.0;      // avoid flip by adding exit margin (degrees)
+ const HYSTERESIS_HEAD_RATIO = 0.85;    // exit threshold multiplier for head-forward
+  // Use UI sliders for angle and head-forward thresholds (see code below)
+  // -------------------------
+
+// Smoothed metric state
+ let emaAngle = null;
+ let emaHead = null;
+ // Posture state machine
+ let postureState = 'unknown'; // 'good' | 'slouch' | 'unknown'
+ let candidateSince = null;    // timestamp when a candidate state first observed
+
+  // DOM references (do not rename)
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('overlay');
+  const ctx = canvas.getContext('2d');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const statusEl = document.getElementById('status');
+  const banner = document.getElementById('banner');
+  const torsoAngleEl = document.getElementById('torsoAngle');
+  const headForwardEl = document.getElementById('headForward');
+  const angleThreshInput = document.getElementById('angleThresh');
+  const angleVal = document.getElementById('angleVal');
+  const headThreshInput = document.getElementById('headThresh');
+  const headVal = document.getElementById('headVal');
+
+  // Internal state
+  let detector = null;
+  let stream = null;
+  let running = false;
+  let rafId = null;
+  let slouchStart = null;
+
+  // UI wiring
+  angleThreshInput.addEventListener('input', () => {
+    angleVal.textContent = angleThreshInput.value + '°';
+  });
+  headThreshInput.addEventListener('input', () => {
+    headVal.textContent = (Number(headThreshInput.value) / 100).toFixed(2);
+  });
+
+  // Initialize MoveNet detector (UMD global: poseDetection)
+  async function initDetector(){
+    statusEl.textContent = 'loading model...';
+    try {
+      // You can switch modelType to SINGLEPOSE_LIGHTNING or SINGLEPOSE_THUNDER for more accuracy (thunder is slower)
+      detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+        modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER
+      });
+      statusEl.textContent = 'model loaded';
+    } catch (err) {
+      console.error('initDetector error', err);
+      statusEl.textContent = 'model load error';
+      throw err;
+    }
+  }
+
+  // Start camera stream
+  async function startCamera(){
+    statusEl.textContent = 'requesting camera...';
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+      // size overlay to video
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      statusEl.textContent = 'camera ready';
+    } catch (err) {
+      console.error('startCamera error', err);
+      statusEl.textContent = 'camera error';
+      throw err;
+    }
+  }
+
+  // small helpers
+  function midpoint(a, b){ return { x: (a.x + b.x)/2, y: (a.y + b.y)/2 }; }
+  function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+
+  // Compute simple posture metrics from keypoints
+  function computeMetrics(pose){
+    if (!pose || !pose.keypoints) return null;
+    const kp = {};
+    for (const k of pose.keypoints) kp[k.name] = k;
+    if (!kp.left_shoulder || !kp.right_shoulder || !kp.left_hip || !kp.right_hip || !kp.nose) return null;
+    if (kp.left_shoulder.score < MIN_KEYPOINT_SCORE || kp.right_shoulder.score < MIN_KEYPOINT_SCORE) return null;
+
+    const shouldersMid = midpoint(kp.left_shoulder, kp.right_shoulder);
+    const hipsMid = midpoint(kp.left_hip, kp.right_hip);
+    const nose = kp.nose;
+
+    // torso vector (shoulders -> hips)
+    const torsoVec = { x: hipsMid.x - shouldersMid.x, y: hipsMid.y - shouldersMid.y };
+    const torsoLen = Math.hypot(torsoVec.x, torsoVec.y) || 1;
+
+    // angle from vertical: angle between torsoVec and (0,1)
+    const dot = torsoVec.y; // dot(torsoVec, (0,1))
+    let angleRad = Math.acos(Math.max(-1, Math.min(1, dot / torsoLen)));
+    let angleDeg = Math.abs(angleRad * 180 / Math.PI);
+
+    // head-forward: horizontal offset of nose from shoulder mid normalized by shoulder width
+    const shoulderWidth = dist(kp.left_shoulder, kp.right_shoulder) || 1;
+    const headForwardNorm = (nose.x - shouldersMid.x) / shoulderWidth; // signed: positive = forward to right
+
+    return { angleDeg, headForwardNorm, shouldersMid, hipsMid, nose };
+  }
+
+  // draw detected keypoints and simple lines
+  function drawPose(pose){
+    ctx.clearRect(0,0,canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(0,0,0,0.02)';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#00FFAA';
+    ctx.fillStyle = '#00FFAA';
+
+    for (const k of (pose.keypoints||[])){
+      if (k.score > 0.4){
+        ctx.beginPath(); ctx.arc(k.x, k.y, 4, 0, Math.PI*2); ctx.fill();
+      }
+    }
+
+    const metrics = computeMetrics(pose);
+    if (metrics){
+      ctx.strokeStyle = '#FFD166';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(metrics.shouldersMid.x, metrics.shouldersMid.y); ctx.lineTo(metrics.hipsMid.x, metrics.hipsMid.y); ctx.stroke();
+
+      ctx.fillStyle = '#FFD166';
+      ctx.beginPath(); ctx.arc(metrics.shouldersMid.x, metrics.shouldersMid.y, 6,0,2*Math.PI); ctx.fill();
+      ctx.beginPath(); ctx.arc(metrics.hipsMid.x, metrics.hipsMid.y, 6,0,2*Math.PI); ctx.fill();
+
+      ctx.fillStyle = '#FF6B6B';
+      ctx.beginPath(); ctx.arc(metrics.nose.x, metrics.nose.y, 6,0,2*Math.PI); ctx.fill();
+    }
+  }
+
+  // Main loop — estimate poses and update UI
+  async function loop(){
+    if (!running) return;
+    try {
+      const poses = await detector.estimatePoses(video, { flipHorizontal: false });
+      if (poses && poses.length){
+        const p = poses[0];
+        drawPose(p);
+        const m = computeMetrics(p);
+        if (m){
+          // 1) update smoothed metrics (initialize on first frame)
+          if (emaAngle === null) emaAngle = m.angleDeg;
+          else emaAngle = SMOOTH_ALPHA * m.angleDeg + (1 - SMOOTH_ALPHA) * emaAngle;
+          if (emaHead === null) emaHead = m.headForwardNorm;
+          else emaHead = SMOOTH_ALPHA * m.headForwardNorm + (1 - SMOOTH_ALPHA) * emaHead;
+
+          // 2) publish smoothed values to UI
+          torsoAngleEl.textContent = emaAngle.toFixed(1);
+          headForwardEl.textContent = Math.abs(emaHead).toFixed(2);
+
+          // 3) compute thresholds with hysteresis
+          const angleThresh = Number(angleThreshInput.value);               // slider numeric value
+          const headThresh = Number(headThreshInput.value) / 100;           // slider percent -> normalized
+          // hysteresis: separate enter/exit thresholds
+          const angleEnter = angleThresh;
+          const angleExit = angleThresh - HYSTERESIS_ANGLE_DEG;
+          const headEnter = headThresh;
+          const headExit = headThresh * HYSTERESIS_HEAD_RATIO;
+
+          const now = performance.now();
+          const candidateIsSlouch = (emaAngle > angleEnter) || (Math.abs(emaHead) > headEnter);
+          const candidateIsGood = (emaAngle < angleExit) && (Math.abs(emaHead) < headExit);
+
+          // Manage candidate timer and commit only if consistent for CHANGE_CONFIRM_MS
+          if (candidateIsSlouch && postureState !== 'slouch'){
+            if (!candidateSince) candidateSince = now;
+            else if (now - candidateSince >= CHANGE_CONFIRM_MS){
+              postureState = 'slouch';
+              candidateSince = null;
+            }
+          } else if (candidateIsGood && postureState !== 'good'){
+            if (!candidateSince) candidateSince = now;
+            else if (now - candidateSince >= CHANGE_CONFIRM_MS){
+              postureState = 'good';
+              candidateSince = null;
+            }
+          } else if (!candidateIsSlouch && !candidateIsGood){
+            // metrics in-between; reset candidate timer but do not flip immediately
+            candidateSince = null;
+          } else {
+            // still same state observed; reset candidate timer
+            candidateSince = null;
+          }
+
+          // 4) update UI / alert based on postureState
+          if (postureState === 'slouch'){
+            if (!slouchStart) slouchStart = now;
+            const slouchTime = now - slouchStart;
+            statusEl.textContent = 'slouching (' + Math.round(slouchTime) + 'ms)';
+            banner.style.display = 'block';
+            banner.style.background = '#551111';
+            if (slouchTime > SLouch_TRIGGER_MS && !banner.dataset.alerted){
+              banner.dataset.alerted = '1';
+              speakAndFlash();
+            }
+          } else if (postureState === 'good') {
+            slouchStart = null;
+            banner.style.display = 'none';
+            banner.dataset.alerted = '';
+            statusEl.textContent = 'good posture';
+          } else {
+            // unknown / initializing
+            statusEl.textContent = 'analyzing...';
+          }
+        } else {
+          statusEl.textContent = 'no reliable keypoints';
+        }
+      } else {
+        statusEl.textContent = 'no pose';
+      }
+    } catch (err) {
+      console.error('loop error', err);
+      statusEl.textContent = 'detection error';
+      running = false;
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function speakAndFlash(){
+    try {
+      const utter = new SpeechSynthesisUtterance('Please sit up. Your posture is slouching.');
+      utter.lang = 'en-US';
+      speechSynthesis.speak(utter);
+    } catch(e){}
+    banner.style.display = 'block';
+    banner.style.background = '#990000';
+  }
+
+  // START: request camera first (so permission prompt appears), then load model
+  async function start(){
+    startBtn.disabled = true;
+
+    if (!window.isSecureContext && location.hostname !== 'localhost') {
+      statusEl.textContent = 'Requires HTTPS or localhost';
+      startBtn.disabled = false;
+      return;
+    }
+
+    statusEl.textContent = 'requesting camera...';
+    try {
+      await startCamera();   // camera prompt appears here
+    } catch (err) {
+      statusEl.textContent = 'camera denied';
+      startBtn.disabled = false;
+      return;
+    }
+
+    statusEl.textContent = 'loading model...';
+    try {
+      if (!detector) await initDetector();
+      running = true;
+      stopBtn.disabled = false;
+      statusEl.textContent = 'running';
+      loop();
+    } catch (err){
+      console.error('start error', err);
+      statusEl.textContent = 'start error';
+      startBtn.disabled = false;
+    }
+  }
+
+  // STOP and cleanup
+  function stop(){
+    running = false;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    if (rafId) cancelAnimationFrame(rafId);
+    if (stream){
+      for (const t of stream.getTracks()) t.stop();
+      stream = null;
+    }
+    if (detector && detector.dispose) detector.dispose();
+    detector = null;
+    statusEl.textContent = 'stopped';
+    banner.style.display = 'none';
+  }
+
+  // Event wiring
+  startBtn.addEventListener('click', start);
+  stopBtn.addEventListener('click', stop);
+
+  // Surface uncaught errors to status for easier debugging
+  window.addEventListener('error', (ev) => { statusEl.textContent = 'error: check console'; console.error(ev.error || ev.message); });
+  window.addEventListener('unhandledrejection', (ev) => { statusEl.textContent = 'promise error'; console.error(ev.reason); });
+
+  // initial UI state
+  console.log('UMD script loaded. navigator.onLine=', navigator.onLine);
+  statusEl.textContent = 'ready (click Start)';
+  </script>
+</body>
+</html>
