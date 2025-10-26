@@ -44,6 +44,23 @@
         </label>
       </div>
       
+      <div class="setting-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="topicAlertsEnabled" checked>
+          <span>💡 Enable Important Topic Alerts</span>
+        </label>
+        <small>AI will analyze video and alert you before important topics are mentioned</small>
+      </div>
+      
+      <div class="setting-group">
+        <label for="topicAlertAdvance">Topic Alert Advance Time (seconds)</label>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <input type="range" id="topicAlertAdvance" min="5" max="30" value="10" style="flex: 1;">
+          <span id="topicAlertAdvanceValue" style="min-width: 40px; font-weight: bold;">10s</span>
+        </div>
+        <small>How many seconds before a topic to show the alert</small>
+      </div>
+      
       <div class="button-group">
         <button id="saveSettings" class="btn-primary">Save Settings</button>
       </div>
@@ -58,6 +75,8 @@
         <li>🤖 AI generates 3-bullet summary of last 20 seconds</li>
         <li>💬 Interactive chat - ask questions about the video</li>
         <li>🎯 Uses actual transcript for accurate answers</li>
+        <li>👁️ Eye tracking pauses video when you look away</li>
+        <li>💡 Alerts you before important topics are mentioned</li>
         <li>⚡ Powered by Groq AI (fast & free)</li>
       </ul>
     </div>

@@ -9,12 +9,17 @@ async function loadSettings() {
     const settings = await chrome.storage.sync.get({
       pauseDelay: 1,
       showOnPause: true,
-      eyeTrackingEnabled: false
+      eyeTrackingEnabled: false,
+      topicAlertsEnabled: true,
+      topicAlertAdvance: 10
     });
 
     document.getElementById('pauseDelay').value = settings.pauseDelay;
     document.getElementById('showOnPause').checked = settings.showOnPause;
     document.getElementById('eyeTrackingEnabled').checked = settings.eyeTrackingEnabled;
+    document.getElementById('topicAlertsEnabled').checked = settings.topicAlertsEnabled;
+    document.getElementById('topicAlertAdvance').value = settings.topicAlertAdvance;
+    document.getElementById('topicAlertAdvanceValue').textContent = settings.topicAlertAdvance + 's';
   } catch (error) {
     console.error('Error loading settings:', error);
     showStatus('Error loading settings', 'error');
@@ -24,6 +29,11 @@ async function loadSettings() {
 function attachEventListeners() {
   // Save Settings button
   document.getElementById('saveSettings').addEventListener('click', saveSettings);
+  
+  // Topic alert advance slider - update display value
+  document.getElementById('topicAlertAdvance').addEventListener('input', (e) => {
+    document.getElementById('topicAlertAdvanceValue').textContent = e.target.value + 's';
+  });
   
   // Eye tracking toggle - save immediately
   document.getElementById('eyeTrackingEnabled').addEventListener('change', async (e) => {
@@ -61,12 +71,19 @@ async function saveSettings() {
     const settings = {
       pauseDelay: parseInt(document.getElementById('pauseDelay').value),
       showOnPause: document.getElementById('showOnPause').checked,
-      eyeTrackingEnabled: document.getElementById('eyeTrackingEnabled').checked
+      eyeTrackingEnabled: document.getElementById('eyeTrackingEnabled').checked,
+      topicAlertsEnabled: document.getElementById('topicAlertsEnabled').checked,
+      topicAlertAdvance: parseInt(document.getElementById('topicAlertAdvance').value)
     };
 
     // Validate
     if (isNaN(settings.pauseDelay) || settings.pauseDelay < 0) {
       showStatus('❌ Invalid popup delay value', 'error');
+      return;
+    }
+    
+    if (isNaN(settings.topicAlertAdvance) || settings.topicAlertAdvance < 5 || settings.topicAlertAdvance > 30) {
+      showStatus('❌ Topic alert advance must be between 5-30 seconds', 'error');
       return;
     }
 

@@ -8,10 +8,15 @@ class YouTubeRecapBot {
     this.recapOverlay = null;
     this.debugOverlay = null;
     this.pausedByEyeTracking = false; // Flag to track eye tracking pauses
+    this.importantTopics = []; // Store important topics with timestamps
+    this.topicCheckInterval = null; // Interval for checking upcoming topics
+    this.shownTopicAlerts = new Set(); // Track which alerts we've already shown
     this.settings = {
       pauseDelay: 1,
       showOnPause: true,
-      aiProvider: 'demo'
+      aiProvider: 'demo',
+      topicAlertsEnabled: true,
+      topicAlertAdvance: 10 // seconds before topic to show alert
     };
     
     console.log('🚀 Initializing YouTube Recap Bot...');
@@ -61,7 +66,9 @@ class YouTubeRecapBot {
         geminiKey: '',
         apiKey: '',
         pauseDelay: 1,
-        showOnPause: true
+        showOnPause: true,
+        topicAlertsEnabled: true,
+        topicAlertAdvance: 10
       });
       this.settings = stored;
     } catch (error) {
@@ -110,6 +117,13 @@ class YouTubeRecapBot {
     this.currentVideo.addEventListener('play', this.boundHandlePlay);
     
     console.log('🎧 Event listeners attached to video');
+    
+    // Analyze video topics if enabled
+    if (this.settings.topicAlertsEnabled) {
+      console.log('💡 Topic alerts enabled - will analyze when ready');
+      // Wait a bit for video metadata to load
+      setTimeout(() => this.analyzeVideoTopics(), 3000);
+    }
   }
 
   handlePause() {
@@ -560,6 +574,19 @@ Format as:
         hasCaption: !!context.captions,
         captionLength: context.captions?.last20Seconds?.length || 0
       });
+      
+      // Show important topics if available
+      if (this.importantTopics && this.importantTopics.length > 0) {
+        console.log('\n💡 Important Topics Detected:');
+        console.log('═'.repeat(60));
+        this.importantTopics.forEach((t, i) => {
+          const timeStr = this.formatTime(t.timestamp);
+          const alertTime = this.formatTime(Math.max(0, t.timestamp - this.settings.topicAlertAdvance));
+          console.log(`  ${i + 1}. "${t.topic}"`);
+          console.log(`     ⏰ Appears at: ${timeStr} | 🔔 Alert at: ${alertTime}`);
+        });
+        console.log('═'.repeat(60) + '\n');
+      }
 
       return context;
     } catch (error) {
@@ -1120,6 +1147,237 @@ Format as:
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  async analyzeVideoTopics() {
+    console.log('🔍 Analyzing video for important topics...');
+    
+    // Reset previous topics
+    this.importantTopics = [];
+    this.shownTopicAlerts.clear();
+    
+    // Stop any existing monitoring
+    if (this.topicCheckInterval) {
+      clearInterval(this.topicCheckInterval);
+    }
+    
+    try {
+      // Get video context and transcript
+      const video = document.querySelector('video');
+      if (!video) return;
+      
+      const currentTime = video.currentTime;
+      const duration = video.duration;
+      
+      // Get full transcript
+      const transcriptData = await this.getYouTubeTranscript(currentTime);
+      
+      if (!transcriptData || !transcriptData.hasContent) {
+        console.log('⚠️ No transcript available for topic analysis');
+        return;
+      }
+      
+      // Get video title
+      const titleElement = document.querySelector('h1.ytd-watch-metadata yt-formatted-string');
+      const title = titleElement ? titleElement.textContent : 'this video';
+      
+      console.log(`📊 Analyzing "${title}" (${this.formatTime(duration)})`);
+      
+      // Analyze with AI
+      const topics = await this.extractImportantTopics(title, transcriptData.fullTranscript, duration);
+      
+      if (topics && topics.length > 0) {
+        this.importantTopics = topics;
+        console.log(`\n✅ Found ${topics.length} important topics:`);
+        console.log('═'.repeat(60));
+        topics.forEach((t, i) => {
+          const timeStr = this.formatTime(t.timestamp);
+          console.log(`  ${i + 1}. 💡 "${t.topic}"`);
+          console.log(`     ⏰ Will appear at: ${timeStr} (${t.timestamp} seconds)`);
+          console.log(`     🔔 Alert shows at: ${this.formatTime(Math.max(0, t.timestamp - this.settings.topicAlertAdvance))}`);
+        });
+        console.log('═'.repeat(60));
+        console.log(`📍 Current video time: ${this.formatTime(currentTime)}`);
+        console.log(`⚠️ You'll get alerts ${this.settings.topicAlertAdvance} seconds before each topic\n`);
+        
+        // Start monitoring for upcoming topics
+        this.startTopicMonitoring();
+      } else {
+        console.log('⚠️ No topics extracted from video');
+      }
+    } catch (error) {
+      console.error('❌ Error analyzing topics:', error);
+    }
+  }
+
+  async extractImportantTopics(title, transcript, duration) {
+    const provider = this.settings.aiProvider;
+    
+    if (provider === 'demo' || !this.settings.groqKey) {
+      console.log('⚠️ Topic analysis requires AI provider (not demo mode)');
+      return [];
+    }
+    
+    try {
+      const prompt = `Analyze this YouTube video transcript and identify the 3 MOST IMPORTANT topics discussed.
+
+Video: "${title}"
+Duration: ${this.formatTime(duration)}
+
+Transcript:
+${transcript.substring(0, 3000)}
+
+Return ONLY a JSON array in this exact format:
+[
+  {"topic": "Topic name", "timestamp": 45},
+  {"topic": "Another topic", "timestamp": 120}
+]
+
+Rules:
+- timestamp should be in SECONDS (not minutes)
+- Pick the 3 most crucial/interesting topics
+- Topics should be spaced apart (not all at the beginning)
+- Be specific about what the topic is about`;
+
+      console.log('🤖 Sending request to Groq AI...');
+
+      if (provider === 'groq') {
+        const apiKey = this.settings.groqKey;
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'llama-3.1-8b-instant',
+            messages: [
+              { role: 'system', content: 'You are a helpful assistant that analyzes video content. Always return valid JSON.' },
+              { role: 'user', content: prompt }
+            ],
+            temperature: 0.3,
+            max_tokens: 300
+          })
+        });
+        
+        if (!response.ok) {
+          console.error('❌ API request failed:', response.status);
+          throw new Error('API request failed');
+        }
+        
+        const data = await response.json();
+        const responseText = data.choices[0].message.content;
+        console.log('📝 AI Response:', responseText);
+        
+        // Try to extract JSON from response
+        const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          const topics = JSON.parse(jsonMatch[0]);
+          return topics.filter(t => t.topic && typeof t.timestamp === 'number');
+        } else {
+          console.warn('⚠️ Could not parse JSON from AI response');
+        }
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('❌ Error extracting topics:', error);
+      return [];
+    }
+  }
+
+  startTopicMonitoring() {
+    console.log('👀 Starting topic monitoring...');
+    
+    // Check every 2 seconds if we're approaching an important topic
+    this.topicCheckInterval = setInterval(() => {
+      const video = document.querySelector('video');
+      if (!video || video.paused) return;
+      
+      const currentTime = video.currentTime;
+      const advanceTime = this.settings.topicAlertAdvance || 10;
+      
+      for (const topic of this.importantTopics) {
+        const timeUntilTopic = topic.timestamp - currentTime;
+        
+        // Show alert if we're within the advance window and haven't shown it yet
+        if (timeUntilTopic > 0 && timeUntilTopic <= advanceTime) {
+          const alertKey = `${topic.topic}-${topic.timestamp}`;
+          
+          if (!this.shownTopicAlerts.has(alertKey)) {
+            console.log(`⏰ Triggering alert: "${topic.topic}" in ${Math.floor(timeUntilTopic)}s`);
+            this.showTopicAlert(topic.topic, Math.floor(timeUntilTopic));
+            this.shownTopicAlerts.add(alertKey);
+          }
+        }
+      }
+    }, 2000);
+  }
+
+  showTopicAlert(topicName, secondsUntil) {
+    console.log(`💡 Showing alert: "${topicName}" in ${secondsUntil}s`);
+    
+    // Remove any existing topic alert
+    const existing = document.getElementById('topic-alert');
+    if (existing) existing.remove();
+    
+    // Create alert overlay
+    const alert = document.createElement('div');
+    alert.id = 'topic-alert';
+    alert.style.cssText = `
+      position: fixed;
+      top: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 15px 30px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: bold;
+      z-index: 999997;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      font-family: 'Segoe UI', sans-serif;
+      animation: slideDown 0.3s ease-out;
+      max-width: 500px;
+      text-align: center;
+    `;
+    
+    alert.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 15px;">
+        <div style="font-size: 28px;">💡</div>
+        <div style="flex: 1; text-align: left;">
+          <div style="font-size: 12px; opacity: 0.9; margin-bottom: 3px;">Important topic in ${secondsUntil}s</div>
+          <div style="font-size: 16px;">${topicName}</div>
+        </div>
+        <button id="dismiss-topic-alert" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 18px;">×</button>
+      </div>
+    `;
+    
+    // Add animation
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideDown {
+        from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+        to { opacity: 1; transform: translateX(-50%) translateY(0); }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    document.body.appendChild(alert);
+    
+    // Dismiss button
+    document.getElementById('dismiss-topic-alert').addEventListener('click', () => {
+      alert.remove();
+    });
+    
+    // Auto-dismiss after 8 seconds
+    setTimeout(() => {
+      if (alert.parentElement) {
+        alert.style.animation = 'slideUp 0.3s ease-in';
+        setTimeout(() => alert.remove(), 300);
+      }
+    }, 8000);
   }
 
   formatBotMessage(text) {
