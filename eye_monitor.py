@@ -1,273 +1,200 @@
 """
-Eye Focus Monitor for YouTube
-Tracks eye gaze and pauses video when user looks away for 5+ seconds
-Uses the existing eye_focus_tracker.py for eye detection
+Eye Focus Monitor for Chrome Native Messaging
+Tracks eye gaze and sends pause commands to Chrome extension when user looks away
 """
 
 import cv2
-import numpy as np
-import time
-import json
 import sys
+import json
 import struct
+import time
 import threading
 
-# Load pre-trained Haar Cascade classifiers
+# Load Haar Cascade classifiers
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
 
-class EyeFocusMonitor:
+class EyeMonitor:
     def __init__(self):
-        sys.stderr.write("[EyeFocus] Initializing eye tracker...\n")
+        self.cap = None
+        self.looking_away_start = None
+        self.away_threshold = 5  # seconds before pausing
+        self.is_focused = True
+        self.last_pause_sent = 0
+        self.running = True
+        
+        # Log to stderr (Chrome native messaging uses stdout for data)
+        self.log("Eye Monitor starting...")
+        
+    def log(self, message):
+        """Log to stderr so it doesn't interfere with native messaging"""
+        sys.stderr.write(f"[EyeMonitor] {message}\n")
         sys.stderr.flush()
         
-        try:
-            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Use DirectShow for Windows
-            
-            # Give camera time to initialize
-            time.sleep(1)
-            
-            if not self.cap.isOpened():
-                sys.stderr.write("[EyeFocus] ERROR: Camera failed to open\n")
-                sys.stderr.flush()
-                raise Exception("Camera not available")
-            
-            # Try to read a test frame
-            ret, frame = self.cap.read()
-            if not ret:
-                sys.stderr.write("[EyeFocus] ERROR: Cannot read from camera\n")
-                sys.stderr.flush()
+    def init_camera(self):
+        """Initialize camera with retry logic"""
+        for attempt in range(3):
+            try:
+                self.log(f"Opening camera (attempt {attempt + 1}/3)...")
+                
+                if self.cap is not None:
+                    self.cap.release()
+                    time.sleep(0.5)
+                
+                # Try DirectShow on Windows for better compatibility
+                self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+                time.sleep(0.5)
+                
+                if self.cap.isOpened():
+                    ret, frame = self.cap.read()
+                    if ret:
+                        self.log("✓ Camera initialized successfully")
+                        return True
+                    else:
+                        self.log("Camera opened but can't read frames")
+                
                 self.cap.release()
-                raise Exception("Cannot read camera frames")
-            
-            sys.stderr.write("[EyeFocus] Camera initialized successfully\n")
-            sys.stderr.flush()
-            
-        except Exception as e:
-            sys.stderr.write(f"[EyeFocus] FATAL: Camera initialization failed: {e}\n")
-            sys.stderr.flush()
-            raise
+                time.sleep(1)
+                
+            except Exception as e:
+                self.log(f"Camera init error: {e}")
+                time.sleep(1)
         
-        self.looking_away_start = None
-        self.away_threshold = 5  # seconds
-        self.is_focused = True
-        self.last_pause_sent = 0  # Prevent spam
-        
-    def detect_eyes(self, frame):
-        """Detect if eyes are visible in frame"""
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # Apply histogram equalization to improve contrast
-        gray = cv2.equalizeHist(gray)
-        
-        # Detect faces - stricter parameters
-        faces = face_cascade.detectMultiScale(
-            gray, 
-            scaleFactor=1.1,   # Stricter
-            minNeighbors=5,    # Stricter (need more confirming neighbors)
-            minSize=(50, 50),  # Minimum face size
-            flags=cv2.CASCADE_SCALE_IMAGE
-        )
-        
-        if len(faces) == 0:
-            # No face detected - definitely looking away
-            return False
-        
-        # Check for eyes in each face region
-        for (x, y, w, h) in faces:
-            # Only look for eyes in upper 60% of face (where eyes actually are)
-            roi_gray = gray[y:y+int(h*0.6), x:x+w]
-            
-            # Stricter eye detection - need both eyes
-            eyes = eye_cascade.detectMultiScale(
-                roi_gray, 
-                scaleFactor=1.1,   # Stricter
-                minNeighbors=6,    # Even stricter - was 5
-                minSize=(25, 25),  # Larger minimum - was (20, 20)
-                maxSize=(80, 80)   # Maximum size to filter out large false positives
-            )
-            
-            # Filter eyes: they should be roughly at the same height (y-coordinate)
-            # and in the middle portion of the face (not at edges)
-            valid_eyes = []
-            face_width = w
-            
-            for (ex, ey, ew, eh) in eyes:
-                # Eye should be in middle 80% of face width (not at edges where ears are)
-                if 0.1 * face_width < ex < 0.9 * face_width:
-                    # Eye aspect ratio should be reasonable (not too elongated)
-                    aspect_ratio = ew / float(eh)
-                    if 0.7 < aspect_ratio < 1.5:  # Eyes are roughly square/circular
-                        valid_eyes.append((ex, ey, ew, eh))
-            
-            # Need at least 2 valid eyes at roughly the same height
-            if len(valid_eyes) >= 2:
-                # Check if eyes are at similar height (within 20 pixels)
-                eyes_sorted = sorted(valid_eyes, key=lambda e: e[1])  # Sort by y
-                if abs(eyes_sorted[0][1] - eyes_sorted[1][1]) < 20:
-                    return True
-        
-        # Face detected but not enough valid eyes - looking away
+        self.log("✗ Failed to initialize camera")
         return False
     
-    def send_pause_command(self):
-        """Send message to Chrome extension to pause video"""
-        current_time = time.time()
-        
-        # Prevent sending multiple pause commands too quickly (reduced to 1 second)
-        if current_time - self.last_pause_sent < 1:
-            sys.stderr.write("[EyeFocus] ⏳ Cooldown active, skipping duplicate pause\n")
-            sys.stderr.flush()
-            return
-        
+    def detect_eyes(self, frame):
+        """Detect if eyes are visible in frame"""
         try:
-            message = {"action": "pause_video", "reason": "eyes_away"}
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            
+            # Detect faces
+            faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+            
+            if len(faces) == 0:
+                return False  # No face detected
+            
+            # Check for eyes in face regions
+            for (x, y, w, h) in faces:
+                roi_gray = gray[y:y+h, x:x+w]
+                eyes = eye_cascade.detectMultiScale(roi_gray, 1.1, 5)
+                
+                if len(eyes) >= 1:  # At least one eye visible
+                    return True
+            
+            return False  # Face but no eyes
+            
+        except Exception as e:
+            self.log(f"Detection error: {e}")
+            return True  # Assume focused on error to avoid false pauses
+    
+    def send_message(self, message):
+        """Send message to Chrome extension using native messaging protocol"""
+        try:
             message_json = json.dumps(message)
             
-            # Chrome native messaging format
+            # Chrome native messaging: 4-byte length header + JSON message
             sys.stdout.buffer.write(struct.pack('I', len(message_json)))
             sys.stdout.buffer.write(message_json.encode('utf-8'))
             sys.stdout.buffer.flush()
             
-            self.last_pause_sent = current_time
-            sys.stderr.write(f"[EyeFocus] Sent pause command - user looked away\n")
-            sys.stderr.flush()
+            self.log(f"✓ Sent: {message_json}")
+            return True
+            
         except Exception as e:
-            sys.stderr.write(f"[EyeFocus] Error sending pause command: {e}\n")
-            sys.stderr.flush()
+            self.log(f"✗ Send error: {e}")
+            return False
     
-    def run(self):
+    def send_pause_command(self):
+        """Send pause command to Chrome"""
+        current_time = time.time()
+        
+        # Prevent spam (minimum 2 seconds between commands)
+        if current_time - self.last_pause_sent < 2:
+            return
+        
+        message = {
+            "action": "pause_video",
+            "reason": "eyes_away"
+        }
+        
+        if self.send_message(message):
+            self.last_pause_sent = current_time
+    
+    def monitor_loop(self):
         """Main monitoring loop"""
+        self.log("Starting eye tracking loop...")
+        
+        if not self.init_camera():
+            self.log("✗ Cannot start - camera initialization failed")
+            return
+        
         try:
-            sys.stderr.write("[EyeFocus] Eye tracking started. Monitoring gaze...\n")
-            sys.stderr.flush()
-            
-            if not self.cap.isOpened():
-                sys.stderr.write("[EyeFocus] ERROR: Cannot open webcam\n")
-                sys.stderr.flush()
-                sys.exit(1)
-            
-            sys.stderr.write("[EyeFocus] Webcam successfully opened\n")
-            sys.stderr.flush()
-            
             frame_count = 0
             
-            while True:
+            while self.running:
                 ret, frame = self.cap.read()
                 
                 if not ret:
-                    sys.stderr.write("[EyeFocus] ERROR: Cannot read frame\n")
-                    sys.stderr.flush()
-                    time.sleep(0.5)
+                    self.log("Cannot read frame, reinitializing camera...")
+                    if not self.init_camera():
+                        break
                     continue
                 
-                frame_count += 1
+                # Check eye detection
+                eyes_detected = self.detect_eyes(frame)
                 
-                # Log every 100 frames to show it's working
-                if frame_count % 100 == 0:
-                    sys.stderr.write(f"[EyeFocus] Processed {frame_count} frames\n")
-                    sys.stderr.flush()
-                
-                # Check if user is looking at screen
-                is_currently_focused = self.detect_eyes(frame)
-                
-                if not is_currently_focused:
-                    # User is looking away or eyes not visible
+                if not eyes_detected:
+                    # User looking away
                     if self.looking_away_start is None:
                         self.looking_away_start = time.time()
-                        sys.stderr.write("[EyeFocus] ⚠️ User looking away - timer started\n")
-                        sys.stderr.flush()
+                        self.log("👀 User looking away...")
                     else:
-                        # Check how long they've been looking away
                         away_duration = time.time() - self.looking_away_start
                         
-                        if away_duration >= self.away_threshold:
-                            # Been away for 5+ seconds
-                            if self.is_focused:
-                                # First time crossing threshold - send pause command
-                                sys.stderr.write(f"[EyeFocus] 🚨 User away for {away_duration:.1f}s - Sending pause command\n")
-                                sys.stderr.flush()
-                                self.send_pause_command()
-                                self.is_focused = False
-                            # else: already sent pause, still looking away - do nothing
+                        # Log every second
+                        if int(away_duration) > int(away_duration - 0.2):
+                            self.log(f"Away: {away_duration:.1f}s / {self.away_threshold}s")
+                        
+                        # Send pause after threshold
+                        if away_duration >= self.away_threshold and self.is_focused:
+                            self.log(f"🔴 THRESHOLD! Sending pause command")
+                            self.send_pause_command()
+                            self.is_focused = False
                 else:
-                    # User is looking at screen
+                    # User looking at screen
                     if self.looking_away_start is not None:
                         away_duration = time.time() - self.looking_away_start
-                        sys.stderr.write(f"[EyeFocus] ✅ User back! (was away {away_duration:.1f}s)\n")
-                        sys.stderr.flush()
-                        self.looking_away_start = None
+                        self.log(f"👁️ User returned (was away {away_duration:.1f}s)")
                     
-                    # Always reset focused flag when looking at screen
-                    if not self.is_focused:
-                        sys.stderr.write("[EyeFocus] 🔄 Reset - ready to detect next look-away\n")
-                        sys.stderr.flush()
-                    self.is_focused = True
+                    self.looking_away_start = None
                     self.is_focused = True
                 
-                # Small delay to reduce CPU usage
-                time.sleep(0.2)
-        
+                # Log status periodically
+                frame_count += 1
+                if frame_count % 50 == 0:
+                    status = "FOCUSED" if eyes_detected else "AWAY"
+                    self.log(f"Status: {status}")
+                
+                time.sleep(0.1)  # 10 FPS
+                
+        except KeyboardInterrupt:
+            self.log("Stopped by user")
         except Exception as e:
-            sys.stderr.write(f"[EyeFocus] FATAL ERROR in run loop: {e}\n")
-            sys.stderr.flush()
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-            sys.stderr.flush()
+            self.log(f"Error in monitor loop: {e}")
         finally:
-            self.cap.release()
-            sys.stderr.write("[EyeFocus] Webcam released\n")
-            sys.stderr.flush()
+            if self.cap is not None:
+                self.cap.release()
+                self.log("Camera released")
+    
+    def run(self):
+        """Start the monitor"""
+        try:
+            self.monitor_loop()
+        except Exception as e:
+            self.log(f"Fatal error: {e}")
+            sys.exit(1)
 
 if __name__ == "__main__":
-    # Start a thread to read from stdin (Chrome native messaging requirement)
-    # This prevents Chrome from thinking the host has hung
-    def read_stdin():
-        """Read and discard messages from Chrome (we don't need them)"""
-        try:
-            while True:
-                text_length_bytes = sys.stdin.buffer.read(4)
-                if len(text_length_bytes) == 0:
-                    # Chrome disconnected
-                    sys.stderr.write("[EyeFocus] Chrome disconnected\n")
-                    sys.stderr.flush()
-                    break
-                
-                text_length = struct.unpack('I', text_length_bytes)[0]
-                text = sys.stdin.buffer.read(text_length).decode('utf-8')
-                sys.stderr.write(f"[EyeFocus] Received from Chrome: {text}\n")
-                sys.stderr.flush()
-        except Exception as e:
-            sys.stderr.write(f"[EyeFocus] stdin reader error: {e}\n")
-            sys.stderr.flush()
-    
-    # Start stdin reader in background thread
-    stdin_thread = threading.Thread(target=read_stdin, daemon=True)
-    stdin_thread.start()
-    
-    try:
-        sys.stderr.write("[EyeFocus] Starting eye monitor...\n")
-        sys.stderr.flush()
-        
-        monitor = EyeFocusMonitor()
-        
-        sys.stderr.write("[EyeFocus] Monitor initialized successfully\n")
-        sys.stderr.flush()
-        
-        monitor.run()
-        
-    except KeyboardInterrupt:
-        sys.stderr.write("\n[EyeFocus] Stopped by user\n")
-        sys.stderr.flush()
-    except Exception as e:
-        sys.stderr.write(f"[EyeFocus] FATAL ERROR: {str(e)}\n")
-        sys.stderr.flush()
-        
-        # Print full traceback
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        sys.stderr.flush()
-        
-        # Don't exit immediately - wait a bit so Chrome can read the error
-        time.sleep(2)
-        sys.exit(1)
+    monitor = EyeMonitor()
+    monitor.run()

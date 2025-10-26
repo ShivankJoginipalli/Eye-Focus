@@ -1,17 +1,13 @@
 // YouTube Recap Bot - Main Content Script
-console.log('🎬 YouTube Recap Bot script executing...');
+console.log('🎬 YouTube Recap Bot loaded');
 
-// Prevent multiple instances
-if (window.youtubeRecapBotInstance) {
-  console.log('⚠️ YouTube Recap Bot instance already exists, skipping initialization');
-} else {
-  console.log('✅ Creating new YouTube Recap Bot instance');
-  
 class YouTubeRecapBot {
   constructor() {
     this.currentVideo = null;
     this.pauseTimeout = null;
     this.recapOverlay = null;
+    this.debugOverlay = null;
+    this.pausedByEyeTracking = false; // Flag to track eye tracking pauses
     this.settings = {
       pauseDelay: 1,
       showOnPause: true,
@@ -26,16 +22,27 @@ class YouTubeRecapBot {
     await this.loadSettings();
     console.log('✅ Settings loaded:', this.settings);
     
-    // Listen for eye tracking messages from background script
+    // Listen for eye tracking pause messages from background script
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('📨 Message received:', message);
+      console.log('📨 Content script received message:', message.type);
+      
       if (message.type === 'EYE_TRACKING_PAUSE') {
-        console.log('👁️ Eye tracking detected: User looked away');
+        console.log('👁️ Eye tracking pause triggered:', message.reason);
         this.handleEyeTrackingPause(message.reason);
         sendResponse({ success: true });
       }
-      return true; // Keep channel open for async response
+      else if (message.type === 'DEBUG_FRAME') {
+        this.updateDebugOverlay(message.frame, message.focused, message.awayDuration);
+        sendResponse({ success: true });
+      }
+      else if (message.type === 'CAMERA_ERROR') {
+        this.showCameraError(message.error);
+        sendResponse({ success: true });
+      }
+      return true; // Keep channel open
     });
+    
+    console.log('✅ Eye tracking listener registered');
     
     // Wait for page to be ready
     if (document.readyState === 'loading') {
@@ -48,7 +55,7 @@ class YouTubeRecapBot {
   async loadSettings() {
     try {
       const stored = await chrome.storage.sync.get({
-        aiProvider: 'groq',
+        aiProvider: 'demo',
         groqKey: '',
         huggingfaceKey: '',
         geminiKey: '',
@@ -56,30 +63,10 @@ class YouTubeRecapBot {
         pauseDelay: 1,
         showOnPause: true
       });
-      
-      // Use API key from config.js file (which is gitignored)
-      const configuredGroqKey = typeof API_CONFIG !== 'undefined' ? API_CONFIG.groqKey : '';
-      
-      // Map aiProvider to provider for consistency
-      this.settings = {
-        ...stored,
-        provider: stored.aiProvider || 'groq',
-        groqKey: configuredGroqKey || stored.groqKey
-      };
-      
-      console.log('📋 Settings loaded - Provider:', this.settings.provider, 'Groq Key:', this.settings.groqKey ? '✓ Set' : '✗ Not set');
+      this.settings = stored;
     } catch (error) {
       console.error('❌ Error loading settings:', error);
       // Use defaults if storage fails
-      const configuredGroqKey = typeof API_CONFIG !== 'undefined' ? API_CONFIG.groqKey : '';
-      this.settings = {
-        provider: 'groq',
-        aiProvider: 'groq',
-        groqKey: configuredGroqKey,
-        apiKey: '',
-        pauseDelay: 1,
-        showOnPause: true
-      };
     }
   }
 
@@ -128,6 +115,12 @@ class YouTubeRecapBot {
   handlePause() {
     console.log('⏸️ Video paused!');
     
+    // Don't show recap if paused by eye tracking
+    if (this.pausedByEyeTracking) {
+      console.log('👁️ Paused by eye tracking - skipping recap overlay');
+      return;
+    }
+    
     if (!this.settings.showOnPause) {
       console.log('⚠️ Show on pause is disabled');
       return;
@@ -149,6 +142,9 @@ class YouTubeRecapBot {
   handlePlay() {
     console.log('▶️ Video playing - hiding overlay');
     
+    // Reset eye tracking flag when video plays
+    this.pausedByEyeTracking = false;
+    
     if (this.pauseTimeout) {
       clearTimeout(this.pauseTimeout);
     }
@@ -156,64 +152,44 @@ class YouTubeRecapBot {
   }
 
   handleEyeTrackingPause(reason) {
-    console.log('👁️ Eye tracking pause triggered:', reason);
+    console.log('👁️ Eye tracking pause handler called');
     
-    // Try multiple selectors to find the video
-    let video = document.querySelector('video.html5-main-video');
+    const video = document.querySelector('video');
     if (!video) {
-      video = document.querySelector('video');
-    }
-    if (!video) {
-      video = document.querySelector('.html5-video-player video');
-    }
-    
-    console.log('📹 Video element found:', !!video);
-    console.log('📹 Video element:', video);
-    console.log('📹 Video paused state:', video ? video.paused : 'no video');
-    
-    if (video) {
-      if (!video.paused) {
-        try {
-          // Pause the video
-          video.pause();
-          console.log('⏸️ Video paused by eye tracking');
-          
-          // Show overlay with eye tracking message
-          this.showRecapOverlay(true, reason);
-        } catch (e) {
-          console.error('❌ Error pausing video:', e);
-        }
-      } else {
-        console.log('⚠️ Video already paused');
-      }
-    } else {
-      console.error('❌ No video element found on page');
-      console.log('Available videos:', document.querySelectorAll('video'));
-    }
-  }
-
-  async showRecapOverlay(isEyeTracking = false, reason = null) {
-    if (this.recapOverlay) {
-      console.log('⚠️ Overlay already visible, not creating duplicate');
+      console.error('❌ No video element found');
       return;
     }
     
-    // Prevent duplicate overlays
-    const existingOverlay = document.querySelector('.youtube-recap-overlay');
-    if (existingOverlay) {
-      console.log('⚠️ Removing existing overlay before creating new one');
-      existingOverlay.remove();
+    console.log('🎬 Video found, paused:', video.paused);
+    
+    if (!video.paused) {
+      console.log('⏸️ Pausing video due to eye tracking...');
+      
+      // Set flag BEFORE pausing (so handlePause knows it was us)
+      this.pausedByEyeTracking = true;
+      
+      video.pause();
+      console.log('✅ Video paused by eye tracking');
+      
+      // Show recap overlay after a short delay
+      if (this.settings.showOnPause) {
+        setTimeout(() => {
+          this.showRecapOverlay();
+        }, this.settings.pauseDelay * 1000);
+      }
+    } else {
+      console.log('⚠️ Video already paused');
+    }
+  }
+
+  async showRecapOverlay() {
+    if (this.recapOverlay) {
+      console.log('⚠️ Overlay already visible');
+      return;
     }
     
     console.log('🎨 Creating recap overlay...');
     const context = await this.getVideoContext();
-    
-    // Add eye tracking info if applicable
-    if (isEyeTracking) {
-      context.eyeTracking = true;
-      context.pauseReason = reason;
-    }
-    
     this.createRecapOverlay(context);
     await this.generateAutoSummary(context);
   }
@@ -1246,40 +1222,6 @@ Format as:
       const message = input.value.trim();
       if (!message) return;
 
-      console.log('💬 User asked:', message);
-      console.log('🔧 Current provider:', this.settings.provider);
-      
-      // Get the correct API key based on provider
-      let apiKeyPresent = false;
-      if (this.settings.provider === 'groq') {
-        apiKeyPresent = !!this.settings.groqKey;
-        console.log('🔑 Groq Key present:', apiKeyPresent);
-      } else if (this.settings.provider === 'huggingface') {
-        apiKeyPresent = !!this.settings.huggingfaceKey;
-        console.log('🔑 HuggingFace Key present:', apiKeyPresent);
-      } else if (this.settings.provider === 'gemini') {
-        apiKeyPresent = !!this.settings.geminiKey;
-        console.log('🔑 Gemini Key present:', apiKeyPresent);
-      } else if (this.settings.provider === 'openai') {
-        apiKeyPresent = !!this.settings.apiKey;
-        console.log('🔑 OpenAI Key present:', apiKeyPresent);
-      }
-
-      // Check if AI is configured
-      if (!this.settings.provider || this.settings.provider === 'demo') {
-        this.addUserMessage(message);
-        this.addBotMessage(`⚙️ **AI Provider Not Configured**\n\nTo get real answers:\n1. Click the extension icon\n2. Select "Groq" (free!)\n3. Get API key from https://console.groq.com\n4. Save settings\n\nThen ask again!`);
-        input.value = '';
-        return;
-      }
-
-      if (!apiKeyPresent) {
-        this.addUserMessage(message);
-        this.addBotMessage(`🔑 **API Key Missing**\n\nPlease add your ${this.settings.provider} API key in settings.`);
-        input.value = '';
-        return;
-      }
-
       this.addUserMessage(message);
       input.value = '';
 
@@ -1330,10 +1272,6 @@ Format as:
     const messagesDiv = this.recapOverlay?.querySelector('.recap-messages');
     if (!messagesDiv) return;
 
-    console.log('🤖 Processing question:', question);
-    console.log('📋 Provider:', this.settings.provider);
-    console.log('🔑 Has API key:', !!this.settings.apiKey);
-
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'message bot-message loading-message';
     loadingDiv.innerHTML = `
@@ -1347,36 +1285,16 @@ Format as:
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
     try {
-      // Get fresh video context
-      const video = document.querySelector('video');
-      const currentTime = video ? video.currentTime : this.currentContext.currentTime;
-      
-      // Check if we need to refresh transcript
-      if (!this.currentContext.captions || !this.currentContext.captions.fullTranscript) {
-        console.log('📜 Fetching transcript for chat...');
-        const transcriptData = await this.getYouTubeTranscript(currentTime);
-        if (transcriptData) {
-          this.currentContext.captions = transcriptData;
-          console.log('✅ Transcript loaded');
-        }
-      }
-
       let response;
       const hasTranscript = this.currentContext.captions && this.currentContext.captions.hasContent;
-      
-      console.log('📝 Has transcript:', hasTranscript);
       
       const contextInfo = {
         title: this.currentContext.title,
         channel: this.currentContext.channel,
-        currentTime: currentTime,
-        duration: video ? video.duration : 0,
+        currentTime: this.currentContext.currentTime,
         question: question,
-        transcript: hasTranscript ? this.currentContext.captions.fullTranscript : null,
-        last20Seconds: hasTranscript ? this.currentContext.captions.last20Seconds : null
+        transcript: hasTranscript ? this.currentContext.captions.fullTranscript : null
       };
-
-      console.log('🎯 Calling AI with provider:', this.settings.provider);
 
       switch (this.settings.provider) {
         case 'groq':
@@ -1395,18 +1313,17 @@ Format as:
           response = await this.generateDemoChatResponse(contextInfo);
       }
 
-      console.log('✅ Got AI response');
       loadingDiv.remove();
       this.addBotMessage(response);
     } catch (error) {
-      console.error('❌ Chat error:', error);
+      console.error('Error generating chat response:', error);
       loadingDiv.remove();
-      this.addBotMessage(`❌ **Error:** ${error.message}\n\nCheck console (F12) for details or verify your API key in settings.`);
+      this.addBotMessage(`❌ Error: ${error.message}`);
     }
   }
 
   async generateGroqChatResponse(context) {
-    const apiKey = this.settings.groqKey;
+    const apiKey = this.settings.apiKey;
     if (!apiKey) throw new Error('Groq API key not configured');
 
     const transcriptContext = context.transcript ? 
@@ -1438,7 +1355,7 @@ Format as:
   }
 
   async generateHuggingFaceChatResponse(context) {
-    const apiKey = this.settings.huggingfaceKey;
+    const apiKey = this.settings.apiKey;
     if (!apiKey) throw new Error('HuggingFace API key not configured');
 
     const transcriptContext = context.transcript ? 
@@ -1468,7 +1385,7 @@ Format as:
   }
 
   async generateGeminiChatResponse(context) {
-    const apiKey = this.settings.geminiKey;
+    const apiKey = this.settings.apiKey;
     if (!apiKey) throw new Error('Gemini API key not configured');
 
     const transcriptContext = context.transcript ? 
@@ -1559,12 +1476,132 @@ Format as:
       }
     }, 300);
   }
+
+  updateDebugOverlay(frameData, focused, awayDuration) {
+    // Get or create THE SINGLE overlay (global, not instance-based)
+    let overlay = document.getElementById('eye-tracking-debug');
+    
+    if (!overlay) {
+      // Remove any orphaned overlays first
+      const orphans = document.querySelectorAll('[class*="eye-tracking"]');
+      orphans.forEach(o => o.remove());
+      
+      // Create the ONE overlay
+      overlay = document.createElement('div');
+      overlay.id = 'eye-tracking-debug';
+      overlay.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        left: 20px;
+        width: 320px;
+        background: rgba(0, 0, 0, 0.9);
+        border: 3px solid ${focused ? '#00ff00' : '#ff0000'};
+        border-radius: 12px;
+        padding: 10px;
+        z-index: 999999;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        font-family: 'Segoe UI', sans-serif;
+      `;
+      
+      overlay.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div style="color: white; font-weight: bold; font-size: 14px;">👁️ Eye Tracking</div>
+          <button class="eye-tracking-close-btn" style="background: none; border: none; color: white; cursor: pointer; font-size: 20px;">×</button>
+        </div>
+        <img class="eye-tracking-frame" style="width: 100%; border-radius: 8px; margin-bottom: 8px; background: #333;" />
+        <div class="eye-tracking-status" style="color: white; font-size: 13px; text-align: center;"></div>
+      `;
+      
+      document.body.appendChild(overlay);
+      
+      // Setup close button handler
+      const closeBtn = overlay.querySelector('.eye-tracking-close-btn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          const toRemove = document.getElementById('eye-tracking-debug');
+          if (toRemove) {
+            toRemove.remove();
+          }
+        });
+      }
+      
+      console.log('✅ Debug overlay created');
+    }
+    
+    // Update the overlay (whether new or existing)
+    this.debugOverlay = overlay;
+    
+    // Update frame
+    const img = overlay.querySelector('.eye-tracking-frame');
+    if (img && frameData) {
+      img.src = 'data:image/jpeg;base64,' + frameData;
+    }
+    
+    // Update status
+    const statusDiv = overlay.querySelector('.eye-tracking-status');
+    if (statusDiv) {
+      const statusText = focused ? '✅ FOCUSED' : '⚠️ LOOKING AWAY';
+      const statusColor = focused ? '#00ff00' : '#ff0000';
+      const awayText = awayDuration > 0 ? ` (${awayDuration.toFixed(1)}s / 5s)` : '';
+      
+      statusDiv.innerHTML = `<span style="color: ${statusColor}; font-weight: bold;">${statusText}</span>${awayText}`;
+    }
+    
+    // Update border color
+    overlay.style.borderColor = focused ? '#00ff00' : '#ff0000';
+  }
+
+  showCameraError(errorMessage) {
+    console.error('📷 Camera error:', errorMessage);
+    
+    // Show error in debug overlay
+    if (!this.debugOverlay) {
+      this.debugOverlay = document.createElement('div');
+      this.debugOverlay.id = 'eye-tracking-debug';
+      this.debugOverlay.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 320px;
+        background: rgba(139, 0, 0, 0.95);
+        border: 3px solid #ff0000;
+        border-radius: 12px;
+        padding: 15px;
+        z-index: 999999;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        font-family: 'Segoe UI', sans-serif;
+      `;
+      
+      this.debugOverlay.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <div style="color: white; font-weight: bold; font-size: 14px;">❌ Camera Error</div>
+          <button id="close-debug" style="background: none; border: none; color: white; cursor: pointer; font-size: 20px;">×</button>
+        </div>
+        <div style="color: white; font-size: 13px; line-height: 1.5;">
+          ${errorMessage}
+          <div style="margin-top: 10px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px; font-size: 12px;">
+            <strong>To fix:</strong><br>
+            • Close Teams, Zoom, Skype<br>
+            • Disable eye_focus_tracker.py if running<br>
+            • Reload this page
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(this.debugOverlay);
+      
+      document.getElementById('close-debug').addEventListener('click', () => {
+        if (this.debugOverlay) {
+          this.debugOverlay.remove();
+          this.debugOverlay = null;
+        }
+      });
+    }
+  }
 }
 
-// Initialize only if instance doesn't exist
-if (!window.youtubeRecapBotInstance) {
-  window.youtubeRecapBotInstance = new YouTubeRecapBot();
-  console.log('✅ YouTube Recap Bot initialized');
+// Only initialize if not already done
+if (!window.youtubeRecapBotInitialized) {
+  window.youtubeRecapBotInitialized = true;
+  new YouTubeRecapBot();
 }
-
-} // End of if block from top of file

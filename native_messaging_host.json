@@ -1,9 +1,9 @@
 {
-  "name": "com.eyefocus.monitor",
-  "description": "Eye Focus Monitor - Native messaging host",
-  "path": "C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\launch_eye_monitor.bat",
-  "type": "stdio",
+  "path": "C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\eye_monitor.bat",
+  "description": "Eye Focus Monitor - Native messaging host for YouTube eye tracking",
   "allowed_origins": [
     "chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/"
-  ]
+  ],
+  "type": "stdio",
+  "name": "com.eyefocus.monitor"
 }

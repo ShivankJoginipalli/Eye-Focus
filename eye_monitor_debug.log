@@ -1,0 +1,122 @@
+
+
+=== Started at 2025-10-26 00:27:51.650167 ===
+Python: C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\.venv\Scripts\python.exe
+Args: ['C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\eye_monitor_debug.py', 'chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/', '--parent-window=0']
+Imports successful
+OpenCV version: 4.12.0
+Cascades loaded
+Camera opened: True
+Starting main loop
+
+
+=== Started at 2025-10-26 00:27:57.625315 ===
+Python: C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\.venv\Scripts\python.exe
+Args: ['C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\eye_monitor_debug.py', 'chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/', '--parent-window=0']
+Imports successful
+OpenCV version: 4.12.0
+Cascades loaded
+Camera opened: True
+Starting main loop
+
+
+=== Started at 2025-10-26 00:28:03.455706 ===
+Python: C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\.venv\Scripts\python.exe
+Args: ['C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\eye_monitor_debug.py', 'chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/', '--parent-window=0']
+Imports successful
+OpenCV version: 4.12.0
+Cascades loaded
+Camera opened: True
+Starting main loop
+
+
+=== Started at 2025-10-26 00:28:09.302212 ===
+Python: C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\.venv\Scripts\python.exe
+Args: ['C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\eye_monitor_debug.py', 'chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/', '--parent-window=0']
+Imports successful
+OpenCV version: 4.12.0
+Cascades loaded
+Camera opened: True
+Starting main loop
+
+
+=== Started at 2025-10-26 00:28:15.253316 ===
+Python: C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\.venv\Scripts\python.exe
+Args: ['C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\eye_monitor_debug.py', 'chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/', '--parent-window=0']
+Imports successful
+OpenCV version: 4.12.0
+Cascades loaded
+Camera opened: True
+Starting main loop
+EXCEPTION: expected 'except' or 'finally' block (eye_monitor.py, line 121)
+Traceback (most recent call last):
+  File "C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\Eye-Focus\eye_monitor_debug.py", line 50, in <module>
+    from eye_monitor import EyeFocusMonitor
+  File "C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\Eye-Focus\eye_monitor.py", line 121
+    self.cap.release()
+    ^^^^
+SyntaxError: expected 'except' or 'finally' block
+
+
+=== Started at 2025-10-26 00:28:21.123350 ===
+Python: C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\.venv\Scripts\python.exe
+Args: ['C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\eye_monitor_debug.py', 'chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/', '--parent-window=0']
+Imports successful
+OpenCV version: 4.12.0
+Cascades loaded
+Camera opened: True
+Starting main loop
+EXCEPTION: expected 'except' or 'finally' block (eye_monitor.py, line 121)
+Traceback (most recent call last):
+  File "C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\Eye-Focus\eye_monitor_debug.py", line 50, in <module>
+    from eye_monitor import EyeFocusMonitor
+  File "C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\Eye-Focus\eye_monitor.py", line 121
+    self.cap.release()
+    ^^^^
+SyntaxError: expected 'except' or 'finally' block
+
+
+=== Started at 2025-10-26 00:28:26.830247 ===
+Python: C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\.venv\Scripts\python.exe
+Args: ['C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\eye_monitor_debug.py', 'chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/', '--parent-window=0']
+Imports successful
+OpenCV version: 4.12.0
+Cascades loaded
+Camera opened: True
+Starting main loop
+EXCEPTION: expected 'except' or 'finally' block (eye_monitor.py, line 121)
+Traceback (most recent call last):
+  File "C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\Eye-Focus\eye_monitor_debug.py", line 50, in <module>
+    from eye_monitor import EyeFocusMonitor
+  File "C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\Eye-Focus\eye_monitor.py", line 121
+    self.cap.release()
+    ^^^^
+SyntaxError: expected 'except' or 'finally' block
+
+
+=== Started at 2025-10-26 00:28:32.617614 ===
+Python: C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\.venv\Scripts\python.exe
+Args: ['C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\eye_monitor_debug.py', 'chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/', '--parent-window=0']
+Imports successful
+OpenCV version: 4.12.0
+Cascades loaded
+Camera opened: True
+Starting main loop
+EXCEPTION: expected 'except' or 'finally' block (eye_monitor.py, line 121)
+Traceback (most recent call last):
+  File "C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\Eye-Focus\eye_monitor_debug.py", line 50, in <module>
+    from eye_monitor import EyeFocusMonitor
+  File "C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\Eye-Focus\eye_monitor.py", line 121
+    self.cap.release()
+    ^^^^
+SyntaxError: expected 'except' or 'finally' block
+
+
+=== Started at 2025-10-26 00:28:38.350832 ===
+Python: C:\Users\sjogi\OneDrive\Attachments\Desktop\EyeFocus\.venv\Scripts\python.exe
+Args: ['C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\eye_monitor_debug.py', 'chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/', '--parent-window=0']
+Imports successful
+OpenCV version: 4.12.0
+Cascades loaded
+Camera opened: True
+Starting main loop
