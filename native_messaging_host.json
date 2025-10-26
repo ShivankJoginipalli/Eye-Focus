@@ -1,9 +1,0 @@
-{
-  "name": "com.eyefocus.monitor",
-  "description": "Eye Focus Monitor - Native messaging host",
-  "path": "C:\\Users\\sjogi\\OneDrive\\Attachments\\Desktop\\EyeFocus\\Eye-Focus\\launch_eye_monitor.bat",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://mmipjcjjiddmgjmllpdfplmidojaaagk/"
-  ]
-}
